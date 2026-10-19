@@ -48,11 +48,13 @@ const words = (s) => String(s ?? "").toLowerCase().replace(/\.(png|jpe?g|webp|gi
 const squash = (s) => words(s).join("");
 const isImage = (item) => item.type === "IMAGE" && item.layer !== "MAP" && !item.metadata?.[TAG];
 
-// the selected item, or else the biggest image on the map layer
+// the selected item, else a map with "main map" in its name, else the biggest image on the map layer
 export async function findMap() {
   const selection = await OBR.player.getSelection();
   if (selection?.length) return selection[0];
   const maps = await OBR.scene.items.getItems((item) => item.layer === "MAP" && item.type === "IMAGE");
+  const main = maps.find((map) => words(map.name).includes("main") && words(map.name).includes("map"));
+  if (main) return main.id;
   let best = null;
   let area = -1;
   for (const map of maps) {
@@ -75,7 +77,12 @@ const outside = ([u, v], m) => [
 
 // ---- put every token where it belongs ----
 export async function sync(state) {
-  if (!state.mapId || !(await OBR.scene.items.getItems([state.mapId])).length) {
+  // the Goers belong to the main map: if it is gone, hide them instead of moving them onto another map
+  if (state.mapId && !(await OBR.scene.items.getItems([state.mapId])).length) {
+    await hideAll();
+    return report("The main map is not in this scene any more, so the Goers are hidden. Put it back, or select a map and click Find map.");
+  }
+  if (!state.mapId) {
     const mapId = await findMap();
     if (!mapId) return report("No map in this scene. Add the main map to the scene as a map first.");
     state = { ...state, mapId };
@@ -175,6 +182,11 @@ export async function sync(state) {
   report(missing.length && images.length
     ? `No image found for ${missing.join(", ")}. Images in the scene: ${images.slice(0, 15).join(", ")}`
     : "");
+}
+
+async function hideAll() {
+  const ids = (await OBR.scene.items.getItems((item) => item.metadata?.[TAG] || item.metadata?.[PLACED])).map((item) => item.id);
+  if (ids.length) await OBR.scene.items.updateItems(ids, (drafts) => drafts.forEach((d) => (d.visible = false)));
 }
 
 export async function removeTokens() {
