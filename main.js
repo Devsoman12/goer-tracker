@@ -1,32 +1,81 @@
 import OBR, { buildShape, buildLabel } from "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm";
 import { GOERS, SETTINGS } from "./config.js";
 import { PETALS } from "./routes.js";
-import { locate, hourOf, isNight } from "./track.js";
+import { locate, nearestOnRoute, shiftFor, stepToward, hourOf, isNight } from "./track.js";
 
 const ID = "wastelands.goer-tracker";
 const STATE = `${ID}/state`;
 const TAG = `${ID}/item`;
-const DEFAULT = { hours: 8, mapId: null, reveal: {}, nightOverlay: true };
+const DEFAULT = { hours: 8, mapId: null, reveal: {}, paused: {}, shift: {}, detached: {}, nightOverlay: true };
 const $ = (id) => document.getElementById(id);
-let role = "PLAYER";
-
-// ---- state (kept in the scene, so it stays with the map) ----
-async function getState() {
-  const meta = await OBR.scene.getMetadata();
-  return { ...DEFAULT, ...(meta[STATE] ?? {}) };
-}
-
-async function change(fn) {
-  const state = await getState();
-  const next = { ...state, ...fn(state) };
-  next.hours = Math.max(0, next.hours);
-  await OBR.scene.setMetadata({ [STATE]: next });
-  await sync(next);
-}
-
+const norm = (s) => String(s ?? "").toLowerCase().replace(/\.(png|jpe?g|webp|gif)$/, "").trim();
 const msg = (text) => ($("msg").textContent = text ?? "");
 
-// ---- tokens ----
+let role = "PLAYER";
+let myId = null;
+let lastBox = null; // the map's bounds at the last update
+const expected = new Map(); // token id -> where the extension last put it
+let busy = false;
+let timer = null;
+
+// ---- state (kept in the scene, so it stays with the map) ----
+const withDefaults = (s) => ({ ...DEFAULT, ...(s ?? {}) });
+const getState = async () => withDefaults((await OBR.scene.getMetadata())[STATE]);
+const saveState = (state) => OBR.scene.setMetadata({ [STATE]: state });
+
+// changes run one after another; fast-forward ticks are skipped while the previous one still runs
+let queue = Promise.resolve();
+function change(fn, { skipIfBusy = false } = {}) {
+  if (skipIfBusy && busy) return queue;
+  queue = queue.then(async () => {
+    busy = true;
+    try {
+      const state = await getState();
+      const next = { ...state, ...fn(state) };
+      await saveState(next);
+      await sync(next);
+    } catch (error) {
+      msg(`Error: ${error?.message ?? error}`);
+    } finally {
+      busy = false;
+    }
+  });
+  return queue;
+}
+
+// move time: paused Goers stay put, Goers taken off their route walk back to it
+function advance(s, dh) {
+  const hours = Math.max(0, s.hours + dh);
+  dh = hours - s.hours;
+  const shift = { ...s.shift };
+  const detached = { ...s.detached };
+  for (const g of GOERS) {
+    const km = (g.kmPerDay * dh) / 24;
+    const paused = !!s.paused[g.name];
+    if (paused || detached[g.name]) shift[g.name] = (shift[g.name] ?? 0) - km;
+    if (detached[g.name] && !paused && km > 0) {
+      const target = nearestOnRoute(g, detached[g.name]);
+      const step = stepToward(detached[g.name], target.p, km);
+      if (step.arrived) {
+        delete detached[g.name];
+        shift[g.name] = shiftFor(g, hours, target.d);
+      } else detached[g.name] = step.at;
+    }
+  }
+  return { hours, shift, detached };
+}
+
+function whereIs(g, s) {
+  if (s.detached[g.name]) return { onMap: true, at: s.detached[g.name], detached: true };
+  return locate(g, s.hours, s.shift[g.name] ?? 0);
+}
+
+// a Goer off the map waits just outside the edge where it left (or will come back)
+const outside = ([u, v], m) => [
+  u <= 0.001 ? -m.u : u >= 0.999 ? 1 + m.u : u,
+  v <= 0.001 ? -m.v : v >= 0.999 ? 1 + m.v : v,
+];
+
 // the selected item, or else the biggest image on the map layer
 async function findMap() {
   const selection = await OBR.player.getSelection();
@@ -41,135 +90,219 @@ async function findMap() {
   return best;
 }
 
+async function offsetOf(item) {
+  const b = await OBR.scene.items.getItemBounds([item.id]);
+  return { x: b.center.x - item.position.x, y: b.center.y - item.position.y, width: b.width };
+}
+
+// ---- tokens ----
 async function sync(state) {
   if (!state.mapId || !(await OBR.scene.items.getItems([state.mapId])).length) {
     const mapId = await findMap();
     if (!mapId) return msg("No map in this scene. Add the main map to the scene as a map first.");
     state = { ...state, mapId };
-    await OBR.scene.setMetadata({ [STATE]: state });
+    await saveState(state);
   }
-  const box = await OBR.scene.items.getItemBounds([state.mapId]);
+  const box = (lastBox = await OBR.scene.items.getItemBounds([state.mapId]));
   const toScene = ([u, v]) => ({ x: box.min.x + u * box.width, y: box.min.y + v * box.height });
-  const size = SETTINGS.tokenSize * box.width;
-  const mine = await OBR.scene.items.getItems((item) => item.metadata?.[TAG]);
-  const have = new Set(mine.map((item) => item.metadata[TAG].key));
+  const perKm = SETTINGS.tokenSizePerKm * box.width;
 
+  let items = await OBR.scene.items.getItems();
+  const userToken = (g) => items.find((i) => i.type === "IMAGE" && i.layer !== "MAP" && norm(i.name) === norm(g.token));
+  const ours = (key) => items.find((i) => i.metadata?.[TAG]?.key === key);
+
+  // create what is missing: the night overlay, a circle for each Goer without its own image, labels
   const add = [];
-  if (!have.has("night")) {
+  const remove = [];
+  if (!ours("night")) {
     add.push(buildShape().shapeType("RECTANGLE").width(box.width).height(box.height).position({ ...box.center })
       .fillColor("#0a1030").fillOpacity(SETTINGS.nightOpacity).strokeWidth(0).strokeOpacity(0)
       .layer("DRAWING").locked(true).disableHit(true).visible(false).name("Night")
       .metadata({ [TAG]: { key: "night" } }).build());
   }
   for (const g of GOERS) {
-    const at = toScene(locate(g, state.hours).at);
-    if (!have.has(g.name)) {
+    const size = perKm * g.sizeKm;
+    const at = toScene(whereIs(g, state).at);
+    const circle = ours(g.name);
+    if (userToken(g)) {
+      if (circle) remove.push(circle.id);
+    } else if (!circle) {
       add.push(buildShape().shapeType("CIRCLE").width(size).height(size).position(at)
         .fillColor(PETALS[g.petal].color).fillOpacity(1).strokeColor("#000000").strokeWidth(size * 0.08)
-        .layer("PROP").locked(true).visible(false).name(g.name)
+        .layer("MOUNT").visible(false).name(g.name)
         .metadata({ [TAG]: { key: g.name, goer: g.name } }).build());
     }
-    if (!have.has(`label:${g.name}`)) {
-      add.push(buildLabel().plainText(g.name).position({ x: at.x, y: at.y + size * 0.8 })
-        .locked(true).visible(false).name(`${g.name} label`)
-        .metadata({ [TAG]: { key: `label:${g.name}`, goer: g.name } }).build());
+    if (SETTINGS.labels && !ours(`label:${g.name}`)) {
+      add.push(buildLabel().plainText(g.name).position(at).locked(true).disableHit(true).visible(false)
+        .name(`${g.name} label`).metadata({ [TAG]: { key: `label:${g.name}`, goer: g.name } }).build());
     }
   }
-  if (add.length) {
-    await OBR.scene.items.addItems(add);
-    await measureShapes(add.filter((item) => item.type === "SHAPE"));
-  }
+  if (remove.length) await OBR.scene.items.deleteItems(remove);
+  if (add.length) await OBR.scene.items.addItems(add);
+  if (remove.length || add.length) items = await OBR.scene.items.getItems();
 
-  const night = isNight(state.hours);
-  const all = await OBR.scene.items.getItems((item) => item.metadata?.[TAG]);
-  await OBR.scene.items.updateItems(all.map((item) => item.id), (drafts) => {
-    for (const d of drafts) {
-      const meta = d.metadata[TAG];
-      const off = meta.off ?? { x: 0, y: 0 };
-      if (meta.key === "night") {
-        d.position = { x: box.center.x - off.x, y: box.center.y - off.y };
-        d.visible = night && state.nightOverlay;
-        continue;
-      }
-      const g = GOERS.find((x) => x.name === meta.goer);
-      if (!g) continue;
-      const loc = locate(g, state.hours);
-      const at = toScene(loc.at);
-      const shown = !!state.reveal[g.name] && loc.onMap;
-      if (meta.key === g.name) {
-        d.position = { x: at.x - off.x, y: at.y - off.y };
-      } else {
-        d.position = { x: at.x, y: at.y + size * 0.8 };
-        d.text.plainText = loc.onMap ? g.name : `${g.name} (off the map)`;
-      }
-      d.visible = shown;
+  // plan every change, then apply them all in one update
+  const plan = new Map();
+  const nightItem = ours("night");
+  if (nightItem) {
+    const off = await offsetOf(nightItem);
+    const dark = isNight(state.hours) && state.nightOverlay;
+    plan.set(nightItem.id, (d) => {
+      d.position = { x: box.center.x - off.x, y: box.center.y - off.y };
+      d.visible = dark;
+    });
+  }
+  for (const g of GOERS) {
+    const loc = whereIs(g, state);
+    const size = perKm * g.sizeKm;
+    const margin = { u: (size * 1.5) / box.width, v: (size * 1.5) / box.height };
+    const at = toScene(loc.onMap ? loc.at : outside(loc.at, margin));
+    const shown = !!state.reveal[g.name] && loc.onMap;
+    const token = userToken(g) ?? ours(g.name);
+    if (token) {
+      const now = await offsetOf(token);
+      const ratio = now.width ? size / now.width : 1;
+      const off = { x: now.x * ratio, y: now.y * ratio };
+      const pos = { x: at.x - off.x, y: at.y - off.y };
+      expected.set(token.id, { pos, off, goer: g.name });
+      plan.set(token.id, (d) => {
+        if (d.type === "IMAGE") d.scale = { x: d.scale.x * ratio, y: d.scale.y * ratio };
+        else {
+          d.width = size;
+          d.height = size;
+        }
+        d.position = pos;
+        d.visible = shown;
+      });
     }
+    const label = ours(`label:${g.name}`);
+    if (label) {
+      plan.set(label.id, (d) => {
+        d.position = { x: at.x, y: at.y + size * 0.65 };
+        d.text.plainText = loc.detached ? `${g.name} (off its route)` : g.name;
+        d.visible = shown;
+      });
+    }
+  }
+  await OBR.scene.items.updateItems([...plan.keys()], (drafts) => {
+    for (const d of drafts) plan.get(d.id)(d);
   });
   msg("");
-}
-
-// shapes may be anchored at a corner or the centre; measure once so the centre lands on the route
-async function measureShapes(shapes) {
-  const offs = {};
-  for (const shape of shapes) {
-    const box = await OBR.scene.items.getItemBounds([shape.id]);
-    offs[shape.id] = { x: box.center.x - shape.position.x, y: box.center.y - shape.position.y };
-  }
-  if (!shapes.length) return;
-  await OBR.scene.items.updateItems(Object.keys(offs), (drafts) => {
-    for (const d of drafts) d.metadata[TAG] = { ...d.metadata[TAG], off: offs[d.id] };
-  });
 }
 
 async function removeTokens() {
   const mine = await OBR.scene.items.getItems((item) => item.metadata?.[TAG]);
   await OBR.scene.items.deleteItems(mine.map((item) => item.id));
+  expected.clear();
+}
+
+// the GM dragged a Goer: take it off its route from where it was dropped
+async function onItemsChange(items) {
+  if (role !== "GM" || busy || !lastBox) return;
+  const moved = {};
+  const tolerance = lastBox.width * 0.002;
+  for (const item of items) {
+    const e = expected.get(item.id);
+    if (!e || item.lastModifiedUserId !== myId) continue;
+    if (Math.hypot(item.position.x - e.pos.x, item.position.y - e.pos.y) <= tolerance) continue;
+    const cx = item.position.x + e.off.x;
+    const cy = item.position.y + e.off.y;
+    moved[e.goer] = [(cx - lastBox.min.x) / lastBox.width, (cy - lastBox.min.y) / lastBox.height];
+    e.pos = item.position;
+  }
+  if (Object.keys(moved).length) await change((s) => ({ detached: { ...s.detached, ...moved } }));
 }
 
 // ---- panel ----
 function render(state) {
   const day = Math.floor(state.hours / 24) + 1;
-  const hour = hourOf(state.hours);
+  const hour = Math.floor(hourOf(state.hours));
   $("clock").textContent = `Day ${day} · ${String(hour).padStart(2, "0")}:00`;
   $("phase").textContent = isNight(state.hours) ? "Night: the Ground wakes up" : "Day: the sun is out";
   if (role !== "GM") return;
-  $("setDay").value = day;
-  $("setHour").value = hour;
+  if (document.activeElement !== $("setDay")) $("setDay").value = day;
+  if (document.activeElement !== $("setHour")) $("setHour").value = hour;
   $("nightOverlay").checked = !!state.nightOverlay;
   const list = $("list");
   list.replaceChildren();
   for (const g of GOERS) {
-    const loc = locate(g, state.hours);
+    const loc = whereIs(g, state);
+    const paused = !!state.paused[g.name];
     const tr = document.createElement("tr");
+
     const name = document.createElement("td");
     const dot = document.createElement("span");
     dot.className = "dot";
     dot.style.background = PETALS[g.petal].color;
     name.append(dot, `${g.name} (${g.petal})`);
+
     const where = document.createElement("td");
     where.className = "muted";
-    where.textContent = loc.onMap ? `on the map · ${g.kmPerDay} km/day` : `off the map, back in ~${Math.ceil(loc.backInDays)} d`;
-    const show = document.createElement("td");
-    const box = document.createElement("input");
-    box.type = "checkbox";
-    box.checked = !!state.reveal[g.name];
-    box.title = "show to players";
-    box.onchange = () => change((s) => ({ reveal: { ...s.reveal, [g.name]: box.checked } }));
-    show.append(box, " show");
-    tr.append(name, where, show);
+    where.textContent = (paused ? "paused · " : "") + (loc.detached
+      ? "off its route, walking back"
+      : loc.onMap ? `on the map · ${g.kmPerDay} km/day` : `off the map, back in ~${Math.ceil(loc.backInDays)} d`);
+
+    const tools = document.createElement("td");
+    tools.className = "tools";
+    const pause = document.createElement("button");
+    pause.className = "small";
+    pause.textContent = paused ? "▶" : "⏸";
+    pause.title = paused ? "let it walk again" : "pause this Goer";
+    pause.onclick = () => change((s) => ({ paused: { ...s.paused, [g.name]: !s.paused[g.name] } }));
+    tools.append(pause);
+    if (loc.detached) {
+      const back = document.createElement("button");
+      back.className = "small";
+      back.textContent = "↩";
+      back.title = "put it back on its route now";
+      back.onclick = () => change((s) => {
+        const target = nearestOnRoute(g, s.detached[g.name]);
+        const detached = { ...s.detached };
+        delete detached[g.name];
+        return { detached, shift: { ...s.shift, [g.name]: shiftFor(g, s.hours, target.d) } };
+      });
+      tools.append(" ", back);
+    }
+    const show = document.createElement("input");
+    show.type = "checkbox";
+    show.checked = !!state.reveal[g.name];
+    show.title = "show to players";
+    show.onchange = () => change((s) => ({ reveal: { ...s.reveal, [g.name]: show.checked } }));
+    tools.append(" ", show, " show");
+
+    tr.append(name, where, tools);
     list.append(tr);
   }
 }
 
+function stopPlay() {
+  clearInterval(timer);
+  timer = null;
+  $("play").textContent = "▶ Play";
+}
+
 function wire() {
-  document.querySelectorAll("button[data-h]").forEach((b) => {
-    b.onclick = () => change((s) => ({ hours: s.hours + Number(b.dataset.h) }));
+  const step = () => Number($("amount").value || 0) * Number($("unit").value);
+  $("plus").onclick = () => change((s) => advance(s, step()));
+  $("minus").onclick = () => change((s) => advance(s, -step()));
+  $("go").onclick = () => change((s) => {
+    const day = Math.max(1, Number($("setDay").value) || 1);
+    const hour = Math.min(23, Math.max(0, Number($("setHour").value) || 0));
+    return advance(s, (day - 1) * 24 + hour - s.hours);
   });
-  $("go").onclick = () => change(() => ({
-    hours: (Math.max(1, Number($("setDay").value) || 1) - 1) * 24 + Math.min(23, Math.max(0, Number($("setHour").value) || 0)),
-  }));
+  for (const rate of SETTINGS.playRates) {
+    const option = document.createElement("option");
+    option.value = rate;
+    option.textContent = `${rate} day${rate > 1 ? "s" : ""} / s`;
+    $("rate").append(option);
+  }
+  $("play").onclick = () => {
+    if (timer) return stopPlay();
+    timer = setInterval(() => change((s) => advance(s, Number($("rate").value) * 24), { skipIfBusy: true }), 1000);
+    $("play").textContent = "⏸ Stop";
+  };
   $("nightOverlay").onchange = () => change(() => ({ nightOverlay: $("nightOverlay").checked }));
-  $("sync").onclick = async () => sync(await getState());
+  $("sync").onclick = () => change(() => ({}));
   $("remove").onclick = () => removeTokens();
   $("useMap").onclick = async () => {
     const mapId = await findMap();
@@ -181,12 +314,18 @@ function wire() {
 
 OBR.onReady(async () => {
   role = await OBR.player.getRole();
+  myId = await OBR.player.getId();
   if (role === "GM") {
     $("gm").classList.remove("hidden");
     wire();
   }
-  const start = async () => render(await getState());
+  const start = async () => {
+    const state = await getState();
+    render(state);
+    if (role === "GM" && state.mapId) await change(() => ({}));
+  };
   if (await OBR.scene.isReady()) start();
   OBR.scene.onReadyChange((ready) => ready && start());
-  OBR.scene.onMetadataChange((meta) => render({ ...DEFAULT, ...(meta[STATE] ?? {}) }));
+  OBR.scene.onMetadataChange((meta) => render(withDefaults(meta[STATE])));
+  OBR.scene.items.onChange(onItemsChange);
 });

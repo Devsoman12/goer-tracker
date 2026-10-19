@@ -11,13 +11,16 @@
     .time { background: var(--panel); border-radius: 8px; padding: 10px; margin-bottom: 10px; }
     .big { font-size: 20px; font-weight: 600; }
     .muted { color: var(--muted); font-size: 12px; }
-    .row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
-    button { background: var(--panel); color: var(--text); border: 1px solid #44486a; border-radius: 6px; padding: 5px 9px; cursor: pointer; font: inherit; }
+    .row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0; }
+    button, select, input[type=number] { background: var(--panel); color: var(--text); border: 1px solid #44486a; border-radius: 6px; padding: 4px 8px; font: inherit; }
+    button { cursor: pointer; }
     button:hover { border-color: var(--accent); }
     button.main { background: var(--accent); color: #1b1b2b; border-color: var(--accent); font-weight: 600; }
-    input[type=number] { width: 70px; background: var(--panel); color: var(--text); border: 1px solid #44486a; border-radius: 6px; padding: 4px; }
+    button.small { padding: 1px 6px; font-size: 12px; }
+    input[type=number] { width: 64px; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    td { padding: 3px 4px; border-bottom: 1px solid #33374f; }
+    td { padding: 3px 4px; border-bottom: 1px solid #33374f; vertical-align: middle; }
+    td.tools { white-space: nowrap; text-align: right; }
     .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; }
     #msg { min-height: 18px; color: #ffcf70; font-size: 12px; }
     .hidden { display: none; }
@@ -31,26 +34,28 @@
   </div>
   <div id="gm" class="hidden">
     <div class="row">
-      <button data-h="-24">−1 day</button>
-      <button data-h="1">+1 h</button>
-      <button data-h="6">+6 h</button>
-      <button data-h="24">+1 day</button>
-      <button data-h="168">+7 days</button>
-      <button data-h="720">+30 days</button>
+      <input type="number" id="amount" value="1" min="0" step="1">
+      <select id="unit"><option value="1">hours</option><option value="24" selected>days</option></select>
+      <button id="plus">+</button>
+      <button id="minus">−</button>
     </div>
     <div class="row">
       Day <input type="number" id="setDay" min="1"> hour <input type="number" id="setHour" min="0" max="23">
-      <button id="go">Set</button>
+      <button id="go">Go to</button>
+    </div>
+    <div class="row">
+      Fast-forward <select id="rate"></select>
+      <button id="play">▶ Play</button>
     </div>
     <div class="row">
       <button id="useMap" title="Uses the selected item, or else the biggest map in the scene">Find map</button>
       <button id="sync" class="main">Place / update tokens</button>
-      <button id="remove">Remove tokens</button>
+      <button id="remove" title="Removes the circles, labels and night overlay; your own token images stay">Remove extension tokens</button>
     </div>
     <div class="row"><label><input type="checkbox" id="nightOverlay"> darken the map at night</label></div>
     <div id="msg"></div>
     <table id="list"></table>
-    <p class="muted">Tokens are hidden from players unless "show" is ticked. Off the map = the Goer is on the part of its loop outside this map.</p>
+    <p class="muted">Your token images are found by name (see config.js); a Goer without one gets a circle. Drag a Goer off its route and it walks back to it as time passes. Goers off the map wait outside its edge, hidden.</p>
   </div>
   <script type="module" src="main.js"></script>
 </body>
