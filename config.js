@@ -20,7 +20,7 @@ export const GOERS = [
 ];
 
 export const SETTINGS = {
-  mapWidthKm: 9500, // this piece of the map, about 3x Russia
+  mapWidthKm: 5500, // this piece of the map: about the size of Russia (3x Russia would be 9500)
   // how long each loop runs outside the map, in km; null = as long as its part on the map
   offMapKm: { N: null, E: null, S: null, W: null },
   dayStartsAt: 6, // hour the sun rises
@@ -28,5 +28,14 @@ export const SETTINGS = {
   tokenSizePerKm: 0.01, // token width for a 1 km Goer, as a part of the map width
   labels: true, // name labels under the tokens at the start (switch them in the panel)
   nightOpacity: 0.45, // how dark the night overlay is
-  playRates: [1, 7, 30, 365], // fast-forward choices, in days per second
+  // how fast time runs when you press Play: game hours per real second
+  playRates: [
+    { label: "real time", hoursPerSecond: 1 / 3600 },
+    { label: "1 min / s", hoursPerSecond: 1 / 60 },
+    { label: "1 hour / s", hoursPerSecond: 1 },
+    { label: "1 day / s", hoursPerSecond: 24 },
+    { label: "7 days / s", hoursPerSecond: 168 },
+    { label: "30 days / s", hoursPerSecond: 720 },
+    { label: "365 days / s", hoursPerSecond: 8760 },
+  ],
 };

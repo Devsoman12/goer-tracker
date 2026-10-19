@@ -35,7 +35,7 @@
   <div id="gm" class="hidden">
     <div class="row">
       <input type="number" id="amount" value="1" min="0" step="1">
-      <select id="unit"><option value="1">hours</option><option value="24" selected>days</option></select>
+      <select id="unit"><option value="0.016666666666666666">minutes</option><option value="1">hours</option><option value="24" selected>days</option></select>
       <button id="plus">+</button>
       <button id="minus">−</button>
     </div>
@@ -44,7 +44,7 @@
       <button id="go">Go to</button>
     </div>
     <div class="row">
-      Fast-forward <select id="rate"></select>
+      Time runs <select id="rate"></select>
       <button id="play">▶ Play</button>
     </div>
     <div class="row">
@@ -58,7 +58,7 @@
     </div>
     <div id="msg"></div>
     <table id="list"></table>
-    <p class="muted">Your token images are found by name (see config.js); a Goer without one gets a circle. Drag a Goer off its route and it walks back to it as time passes. Goers off the map wait outside its edge, hidden.</p>
+    <p class="muted">Your token images are found by name (see config.js); a Goer without one gets a circle. Drag a Goer off its route and it walks back to it as time passes. Goers off the map wait outside its edge, hidden. When two Goers would bump into each other, the slower one waits. Play keeps running while the room is open, even with this panel closed.</p>
   </div>
   <script type="module" src="main.js"></script>
 </body>
