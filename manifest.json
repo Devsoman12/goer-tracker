@@ -1,0 +1,15 @@
+{
+  "name": "Goer Tracker",
+  "version": "0.1.0",
+  "manifest_version": 1,
+  "description": "Moves the Goers along their routes on the Wastelands main map, with day and night.",
+  "author": "Wastelands GM",
+  "icon": "icon.svg",
+  "action": {
+    "title": "Goer Tracker",
+    "icon": "icon.svg",
+    "popover": "index.html",
+    "height": 560,
+    "width": 360
+  }
+}
