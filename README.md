@@ -8,7 +8,7 @@ Moves the Goers along their routes on the Wastelands main map, keeps the day and
 - `track.js`: the movement maths. `main.js`, `index.html`: the panel in Owlbear. `manifest.json`, `icon.svg`: what Owlbear loads.
 
 ## Put it online (GitHub Pages, free)
-1. Create a public repository, for example `goer-tracker`, and upload all the files from this folder.
+1. Create a public repository named `goer-tracker` and upload all the files from this folder. Owlbear reads the paths in `manifest.json` from the site root, so they start with `/goer-tracker/`; with another repository name, change them.
 2. Settings → Pages → Deploy from a branch → `main`, folder `/ (root)` → Save. After a minute the site is at `https://<your-name>.github.io/goer-tracker/`.
 3. In Owlbear Rodeo: Profile → Extensions → Add custom extension → `https://<your-name>.github.io/goer-tracker/manifest.json`.
 4. Turn the extension on in your room.
