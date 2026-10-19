@@ -50,7 +50,7 @@
     <div class="row">
       <button id="useMap" title="Uses the selected item, or else the biggest map in the scene">Find map</button>
       <button id="sync" class="main">Place / update tokens</button>
-      <button id="remove" title="Removes the circles, labels and night overlay; your own token images stay">Remove extension tokens</button>
+      <button id="remove" title="Removes the circles, labels and night overlay; your own token images stay. Do this before you turn the extension off.">Remove extension tokens</button>
     </div>
     <div class="row">
       <label><input type="checkbox" id="nightOverlay"> darken the map at night</label>
@@ -58,7 +58,7 @@
     </div>
     <div id="msg"></div>
     <table id="list"></table>
-    <p class="muted">Your token images are found by name (see config.js); a Goer without one gets a circle. Drag a Goer off its route and it walks back to it as time passes. Goers off the map wait outside its edge, hidden. When two Goers would bump into each other, the slower one waits. Play keeps running while the room is open, even with this panel closed.</p>
+    <p class="muted">Your token images are found by name (see config.js); a Goer without one gets a circle. Labels and circles are only for you and vanish with the extension; faint = hidden from players. Drag a Goer off its route and it walks back to it as time passes. Goers off the map wait outside its edge, hidden. When two Goers would bump into each other, the slower one waits. Play keeps running while the room is open, even with this panel closed.</p>
   </div>
   <script type="module" src="main.js"></script>
 </body>

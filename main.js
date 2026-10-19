@@ -111,11 +111,7 @@ OBR.onReady(async () => {
     $("gm").classList.remove("hidden");
     wire();
   }
-  const start = async () => {
-    const state = await getState();
-    render(state);
-    if (role === "GM" && state.mapId) await change(() => ({}));
-  };
+  const start = async () => render(await getState());
   if (await OBR.scene.isReady()) start();
   OBR.scene.onReadyChange((ready) => ready && start());
   OBR.scene.onMetadataChange((meta) => render(withDefaults(meta[STATE])));

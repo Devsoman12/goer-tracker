@@ -6,12 +6,16 @@ import { whereIs, isNight } from "./track.js";
 export { OBR };
 export const ID = "wastelands.goer-tracker";
 export const STATE = `${ID}/state`;
-const TAG = `${ID}/item`; // items the extension made: circles, labels, night overlay
+const TAG = `${ID}/item`; // items the extension made
 const PLACED = `${ID}/placed`; // on every Goer token: where the extension last put it
 export const DEFAULT = {
   hours: 8, mapId: null, reveal: {}, paused: {}, shift: {}, detached: {}, waiting: {},
   nightOverlay: true, labels: SETTINGS.labels, playRate: 0,
 };
+
+// Labels and the stand-in circles are local items: only the GM sees them, and they disappear
+// with the extension. Only the night overlay is a real scene item, because the players see it too.
+const local = () => OBR.scene.local;
 
 let report = () => {};
 export const onReport = (fn) => (report = fn);
@@ -47,6 +51,7 @@ export function change(fn, { skipIfBusy = false } = {}) {
 const words = (s) => String(s ?? "").toLowerCase().replace(/\.(png|jpe?g|webp|gif)$/, "").split(/[^a-z0-9]+/).filter(Boolean);
 const squash = (s) => words(s).join("");
 const isImage = (item) => item.type === "IMAGE" && item.layer !== "MAP" && !item.metadata?.[TAG];
+const keyOf = (item) => item.metadata?.[TAG]?.key;
 
 // the selected item, else a map with "main map" in its name, else the biggest image on the map layer
 export async function findMap() {
@@ -64,8 +69,8 @@ export async function findMap() {
   return best;
 }
 
-async function offsetOf(item) {
-  const b = await OBR.scene.items.getItemBounds([item.id]);
+async function offsetOf(api, item) {
+  const b = await api.getItemBounds([item.id]);
   return { x: b.center.x - item.position.x, y: b.center.y - item.position.y, width: b.width };
 }
 
@@ -93,51 +98,61 @@ export async function sync(state) {
   const perKm = SETTINGS.tokenSizePerKm * box.width;
 
   let items = await OBR.scene.items.getItems();
+  let helpers = await local().getItems((item) => keyOf(item));
+
+  // tidy up: circles and labels that older versions put into the scene, doubled helpers
+  const stale = items.filter((i) => keyOf(i) && keyOf(i) !== "night").map((i) => i.id);
+  if (!state.nightOverlay) stale.push(...items.filter((i) => keyOf(i) === "night").map((i) => i.id));
+  if (stale.length) await OBR.scene.items.deleteItems(stale);
+  const seen = new Set();
+  const doubled = helpers.filter((i) => seen.has(keyOf(i)) || !seen.add(keyOf(i))).map((i) => i.id);
+  if (doubled.length) await local().deleteItems(doubled);
+
   // its image: the exact token name first, else an image whose name has the Goer's name as a word
   const userToken = (g) =>
     items.find((i) => isImage(i) && squash(i.name) === squash(g.token)) ??
     items.find((i) => isImage(i) && words(i.name).includes(g.name.toLowerCase()));
-  const ours = (key) => items.find((i) => i.metadata?.[TAG]?.key === key);
+  const helper = (key) => helpers.find((i) => keyOf(i) === key);
 
-  // create what is missing: the night overlay, a circle for each Goer without its own image, labels
+  // create what is missing
+  if (state.nightOverlay && !items.some((i) => keyOf(i) === "night")) {
+    await OBR.scene.items.addItems([buildShape().shapeType("RECTANGLE").width(box.width).height(box.height)
+      .position({ ...box.center }).fillColor("#0a1030").fillOpacity(SETTINGS.nightOpacity).strokeWidth(0).strokeOpacity(0)
+      .layer("DRAWING").locked(true).disableHit(true).visible(false).name("Night")
+      .metadata({ [TAG]: { key: "night" } }).build()]);
+  }
   const add = [];
   const remove = [];
-  if (!ours("night")) {
-    add.push(buildShape().shapeType("RECTANGLE").width(box.width).height(box.height).position({ ...box.center })
-      .fillColor("#0a1030").fillOpacity(SETTINGS.nightOpacity).strokeWidth(0).strokeOpacity(0)
-      .layer("DRAWING").locked(true).disableHit(true).visible(false).name("Night")
-      .metadata({ [TAG]: { key: "night" } }).build());
-  }
   for (const g of GOERS) {
     const size = perKm * g.sizeKm;
     const at = toScene(whereIs(g, state).at);
-    const circle = ours(g.name);
+    const circle = helper(g.name);
     if (userToken(g)) {
       if (circle) remove.push(circle.id);
     } else if (!circle) {
       add.push(buildShape().shapeType("CIRCLE").width(size).height(size).position(at)
         .fillColor(PETALS[g.petal].color).fillOpacity(1).strokeColor("#000000").strokeWidth(size * 0.08)
-        .layer("MOUNT").visible(false).name(g.name)
-        .metadata({ [TAG]: { key: g.name, goer: g.name } }).build());
+        .layer("MOUNT").name(g.name).metadata({ [TAG]: { key: g.name, goer: g.name } }).build());
     }
-    if (state.labels && !ours(`label:${g.name}`)) {
-      add.push(buildLabel().plainText(g.name).position(at).locked(true).disableHit(true).visible(false)
+    const label = helper(`label:${g.name}`);
+    if (state.labels && !label) {
+      add.push(buildLabel().plainText(g.name).position(at).locked(true).disableHit(true)
         .name(`${g.name} label`).metadata({ [TAG]: { key: `label:${g.name}`, goer: g.name } }).build());
-    }
+    } else if (!state.labels && label) remove.push(label.id);
   }
-  // labels switched off are removed, so they are gone for the GM too
-  if (!state.labels) remove.push(...items.filter((i) => String(i.metadata?.[TAG]?.key).startsWith("label:")).map((i) => i.id));
-  if (remove.length) await OBR.scene.items.deleteItems(remove);
-  if (add.length) await OBR.scene.items.addItems(add);
-  if (remove.length || add.length) items = await OBR.scene.items.getItems();
+  if (remove.length) await local().deleteItems(remove);
+  if (add.length) await local().addItems(add);
+  items = await OBR.scene.items.getItems();
+  helpers = await local().getItems((item) => keyOf(item));
 
-  // plan every change, then apply them all in one update
-  const plan = new Map();
-  const nightItem = ours("night");
+  // plan every change, then apply them: scene items in one update, local helpers in another
+  const scenePlan = new Map();
+  const localPlan = new Map();
+  const nightItem = items.find((i) => keyOf(i) === "night");
   if (nightItem) {
-    const off = await offsetOf(nightItem);
-    const dark = isNight(state.hours) && state.nightOverlay;
-    plan.set(nightItem.id, (d) => {
+    const off = await offsetOf(OBR.scene.items, nightItem);
+    const dark = isNight(state.hours);
+    scenePlan.set(nightItem.id, (d) => {
       d.position = { x: box.center.x - off.x, y: box.center.y - off.y };
       d.visible = dark;
     });
@@ -148,35 +163,42 @@ export async function sync(state) {
     const margin = { u: (size * 1.5) / box.width, v: (size * 1.5) / box.height };
     const at = toScene(loc.onMap ? loc.at : outside(loc.at, margin));
     const shown = !!state.reveal[g.name] && loc.onMap;
-    const token = userToken(g) ?? ours(g.name);
+    const image = userToken(g);
+    const token = image ?? helper(g.name);
     if (token) {
-      const now = await offsetOf(token);
+      const api = image ? OBR.scene.items : local();
+      const now = await offsetOf(api, token);
       const ratio = now.width ? size / now.width : 1;
       const off = { x: now.x * ratio, y: now.y * ratio };
       const pos = { x: at.x - off.x, y: at.y - off.y };
-      plan.set(token.id, (d) => {
-        if (d.type === "IMAGE") d.scale = { x: d.scale.x * ratio, y: d.scale.y * ratio };
-        else {
+      (image ? scenePlan : localPlan).set(token.id, (d) => {
+        if (d.type === "IMAGE") {
+          d.scale = { x: d.scale.x * ratio, y: d.scale.y * ratio };
+          d.visible = shown;
+        } else {
           d.width = size;
           d.height = size;
+          d.style.fillOpacity = shown ? 1 : 0.4; // the circle is only for you; faint = hidden from players
         }
         d.position = pos;
-        d.visible = shown;
         d.metadata[PLACED] = { goer: g.name, pos, off, size };
       });
     }
-    const label = ours(`label:${g.name}`);
+    const label = helper(`label:${g.name}`);
     if (label) {
-      plan.set(label.id, (d) => {
+      localPlan.set(label.id, (d) => {
         d.position = { x: at.x, y: at.y + size * 0.65 };
-        d.text.plainText = loc.detached ? `${g.name} (off its route)` : g.name;
-        d.visible = shown;
+        d.text.plainText = !loc.onMap ? `${g.name} (off the map)` : loc.detached ? `${g.name} (off its route)` : g.name;
+        d.style.backgroundOpacity = shown ? 0.85 : 0.35; // faint = hidden from players
       });
     }
   }
-  await OBR.scene.items.updateItems([...plan.keys()], (drafts) => {
-    for (const d of drafts) plan.get(d.id)(d);
-  });
+  if (scenePlan.size) {
+    await OBR.scene.items.updateItems([...scenePlan.keys()], (drafts) => drafts.forEach((d) => scenePlan.get(d.id)(d)));
+  }
+  if (localPlan.size) {
+    await local().updateItems([...localPlan.keys()], (drafts) => drafts.forEach((d) => localPlan.get(d.id)(d)));
+  }
   const missing = GOERS.filter((g) => !userToken(g)).map((g) => g.name);
   const images = items.filter(isImage).map((i) => `"${i.name}"`);
   report(missing.length && images.length
@@ -185,25 +207,30 @@ export async function sync(state) {
 }
 
 async function hideAll() {
-  const ids = (await OBR.scene.items.getItems((item) => item.metadata?.[TAG] || item.metadata?.[PLACED])).map((item) => item.id);
-  if (ids.length) await OBR.scene.items.updateItems(ids, (drafts) => drafts.forEach((d) => (d.visible = false)));
+  const placed = await OBR.scene.items.getItems((item) => item.metadata?.[PLACED] || keyOf(item));
+  if (placed.length) await OBR.scene.items.updateItems(placed.map((i) => i.id), (drafts) => drafts.forEach((d) => (d.visible = false)));
+  const helpers = await local().getItems((item) => keyOf(item));
+  if (helpers.length) await local().deleteItems(helpers.map((i) => i.id));
 }
 
+// removes everything the extension made: helpers, the night overlay, circles left by older versions
 export async function removeTokens() {
-  const mine = await OBR.scene.items.getItems((item) => item.metadata?.[TAG]);
-  await OBR.scene.items.deleteItems(mine.map((item) => item.id));
+  const scene = await OBR.scene.items.getItems((item) => keyOf(item));
+  if (scene.length) await OBR.scene.items.deleteItems(scene.map((item) => item.id));
+  const helpers = await local().getItems((item) => keyOf(item));
+  if (helpers.length) await local().deleteItems(helpers.map((item) => item.id));
 }
 
 // the GM dragged a Goer: it leaves its route where it was dropped
 export async function onItemsChange(items, gmId) {
   const moved = items.filter((item) => {
     const placed = item.metadata?.[PLACED];
-    if (!placed || item.lastModifiedUserId !== gmId) return false;
+    if (!placed || (item.lastModifiedUserId && item.lastModifiedUserId !== gmId)) return false;
     return Math.hypot(item.position.x - placed.pos.x, item.position.y - placed.pos.y) > placed.size * 0.1;
   });
   if (!moved.length) return;
   const state = await getState();
-  if (!state.mapId) return;
+  if (!state.mapId || !(await OBR.scene.items.getItems([state.mapId])).length) return;
   const box = await OBR.scene.items.getItemBounds([state.mapId]);
   const dropped = {};
   for (const item of moved) {

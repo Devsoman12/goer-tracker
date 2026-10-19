@@ -8,6 +8,12 @@ OBR.onReady(async () => {
   if ((await OBR.player.getRole()) !== "GM") return;
   const gmId = await OBR.player.getId();
   OBR.scene.items.onChange((items) => onItemsChange(items, gmId));
+  OBR.scene.local.onChange((items) => onItemsChange(items, gmId));
+
+  // the labels and circles are local and vanish on reload: put them back when a scene opens
+  const restore = async () => (await getState()).mapId && change(() => ({}));
+  if (await OBR.scene.isReady()) restore();
+  OBR.scene.onReadyChange((ready) => ready && restore());
 
   let last = Date.now();
   let pending = 0;
