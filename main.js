@@ -8,7 +8,10 @@ const STATE = `${ID}/state`;
 const TAG = `${ID}/item`;
 const DEFAULT = { hours: 8, mapId: null, reveal: {}, paused: {}, shift: {}, detached: {}, nightOverlay: true };
 const $ = (id) => document.getElementById(id);
-const norm = (s) => String(s ?? "").toLowerCase().replace(/\.(png|jpe?g|webp|gif)$/, "").trim();
+// "founder_token.png", "Founder Token" and "founder-token" all read as the same name
+const words = (s) => String(s ?? "").toLowerCase().replace(/\.(png|jpe?g|webp|gif)$/, "").split(/[^a-z0-9]+/).filter(Boolean);
+const squash = (s) => words(s).join("");
+const isImage = (item) => item.type === "IMAGE" && item.layer !== "MAP" && !item.metadata?.[TAG];
 const msg = (text) => ($("msg").textContent = text ?? "");
 
 let role = "PLAYER";
@@ -108,7 +111,10 @@ async function sync(state) {
   const perKm = SETTINGS.tokenSizePerKm * box.width;
 
   let items = await OBR.scene.items.getItems();
-  const userToken = (g) => items.find((i) => i.type === "IMAGE" && i.layer !== "MAP" && norm(i.name) === norm(g.token));
+  // its image: the exact token name first, else an image whose name has the Goer's name as a word
+  const userToken = (g) =>
+    items.find((i) => isImage(i) && squash(i.name) === squash(g.token)) ??
+    items.find((i) => isImage(i) && words(i.name).includes(g.name.toLowerCase()));
   const ours = (key) => items.find((i) => i.metadata?.[TAG]?.key === key);
 
   // create what is missing: the night overlay, a circle for each Goer without its own image, labels
@@ -187,7 +193,11 @@ async function sync(state) {
   await OBR.scene.items.updateItems([...plan.keys()], (drafts) => {
     for (const d of drafts) plan.get(d.id)(d);
   });
-  msg("");
+  const missing = GOERS.filter((g) => !userToken(g)).map((g) => g.name);
+  const images = items.filter(isImage).map((i) => `"${i.name}"`);
+  msg(missing.length && images.length
+    ? `No image found for ${missing.join(", ")}. Images in the scene: ${images.slice(0, 15).join(", ")}`
+    : "");
 }
 
 async function removeTokens() {
