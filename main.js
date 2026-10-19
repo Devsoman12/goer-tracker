@@ -20,6 +20,7 @@ function render(state) {
   if (document.activeElement !== $("setHour")) $("setHour").value = hour;
   $("nightOverlay").checked = !!state.nightOverlay;
   $("labels").checked = !!state.labels;
+  $("autoReveal").checked = !!state.autoReveal;
   $("play").textContent = state.playRate ? "⏸ Stop" : "▶ Play";
   if (state.playRate) $("rate").value = String(state.playRate);
 
@@ -41,6 +42,7 @@ function render(state) {
     let text = loc.detached ? "off its route, walking back"
       : loc.onMap ? `on the map · ${g.kmPerDay} km/day` : `off the map, back in ~${Math.ceil(loc.backInDays)} d`;
     if (state.waiting[g.name] && !paused) text = `waiting for ${state.waiting[g.name]} to pass`;
+    if (state.heard[g.name]) text += " · the players hear it";
     where.textContent = (paused ? "paused · " : "") + text;
 
     const tools = document.createElement("td");
@@ -95,6 +97,7 @@ function wire() {
   $("rate").onchange = () => change((s) => (s.playRate ? { playRate: Number($("rate").value) } : {}));
   $("nightOverlay").onchange = () => change(() => ({ nightOverlay: $("nightOverlay").checked }));
   $("labels").onchange = () => change(() => ({ labels: $("labels").checked }));
+  $("autoReveal").onchange = () => change(() => ({ autoReveal: $("autoReveal").checked }));
   $("sync").onclick = () => change(() => ({}));
   $("remove").onclick = () => removeTokens();
   $("useMap").onclick = async () => {

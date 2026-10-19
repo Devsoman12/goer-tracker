@@ -1,7 +1,7 @@
 import OBR, { buildShape, buildLabel } from "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm";
 import { GOERS, SETTINGS } from "./config.js";
 import { PETALS } from "./routes.js";
-import { whereIs, isNight } from "./track.js";
+import { whereIs, isNight, kmBetween } from "./track.js";
 
 export { OBR };
 export const ID = "wastelands.goer-tracker";
@@ -10,7 +10,7 @@ const TAG = `${ID}/item`; // items the extension made
 const PLACED = `${ID}/placed`; // on every Goer token: where the extension last put it
 export const DEFAULT = {
   hours: 8, mapId: null, reveal: {}, paused: {}, shift: {}, detached: {}, waiting: {},
-  nightOverlay: true, labels: SETTINGS.labels, playRate: 0,
+  nightOverlay: true, labels: SETTINGS.labels, playRate: 0, autoReveal: true, heard: {},
 };
 
 // Labels and the stand-in circles are local items: only the GM sees them, and they disappear
@@ -114,6 +114,18 @@ export async function sync(state) {
     items.find((i) => isImage(i) && words(i.name).includes(g.name.toLowerCase()));
   const helper = (key) => helpers.find((i) => keyOf(i) === key);
 
+  // where the players are on the main map, and which Goers they can hear
+  const party = partyPoints(items, box);
+  const heard = {};
+  for (const g of GOERS) {
+    const loc = whereIs(g, state);
+    if (state.autoReveal && loc.onMap && party.some((p) => kmBetween(p, loc.at) <= SETTINGS.hearingKmPerKm * g.sizeKm)) heard[g.name] = true;
+  }
+  if (JSON.stringify(heard) !== JSON.stringify(state.heard)) {
+    state = { ...state, heard };
+    await saveState(state);
+  }
+
   // create what is missing
   if (state.nightOverlay && !items.some((i) => keyOf(i) === "night")) {
     await OBR.scene.items.addItems([buildShape().shapeType("RECTANGLE").width(box.width).height(box.height)
@@ -162,7 +174,7 @@ export async function sync(state) {
     const size = perKm * g.sizeKm;
     const margin = { u: (size * 1.5) / box.width, v: (size * 1.5) / box.height };
     const at = toScene(loc.onMap ? loc.at : outside(loc.at, margin));
-    const shown = !!state.reveal[g.name] && loc.onMap;
+    const shown = loc.onMap && (!!state.reveal[g.name] || !!heard[g.name]);
     const image = userToken(g);
     const token = image ?? helper(g.name);
     if (token) {
@@ -204,6 +216,26 @@ export async function sync(state) {
   report(missing.length && images.length
     ? `No image found for ${missing.join(", ")}. Images in the scene: ${images.slice(0, 15).join(", ")}`
     : "");
+}
+
+// the tokens that stand for the players: named in config.js, or every visible character token on the map
+function partyPoints(items, box) {
+  const names = SETTINGS.partyTokens.map(squash);
+  return items
+    .filter((i) => i.layer === "CHARACTER" && i.visible && !keyOf(i) && (!names.length || names.includes(squash(i.name))))
+    .map((i) => i.position)
+    .filter((p) => p.x >= box.min.x && p.x <= box.max.x && p.y >= box.min.y && p.y <= box.max.y)
+    .map((p) => [(p.x - box.min.x) / box.width, (p.y - box.min.y) / box.height]);
+}
+
+// when a player token moves, check again who can be heard
+let partyWhere = "";
+export function onPartyMove(items) {
+  const now = JSON.stringify(items.filter((i) => i.layer === "CHARACTER").map((i) => [i.id, Math.round(i.position.x), Math.round(i.position.y), i.visible]));
+  if (now === partyWhere) return;
+  const first = !partyWhere;
+  partyWhere = now;
+  if (!first) change(() => ({}));
 }
 
 async function hideAll() {

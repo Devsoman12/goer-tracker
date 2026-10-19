@@ -26,6 +26,11 @@ export const SETTINGS = {
   dayStartsAt: 6, // hour the sun rises
   nightStartsAt: 18, // hour the sun sets
   tokenSizePerKm: 0.01, // token width for a 1 km Goer, as a part of the map width
+  // a Goer the players can hear stomping is shown to them by itself (if that is switched on in the panel):
+  // within this many km for every km of the Goer's length, so the Founder (2.4 km) is heard from 480 km
+  hearingKmPerKm: 200,
+  // names of the tokens that stand for the players on the main map; empty = every visible character token on it
+  partyTokens: [],
   labels: true, // name labels under the tokens at the start (switch them in the panel)
   nightOpacity: 0.45, // how dark the night overlay is
   // how fast time runs when you press Play: game hours per real second

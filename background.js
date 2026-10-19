@@ -1,5 +1,5 @@
 // Runs in the background while the room is open: the clock (Play) and dragging Goers off their route.
-import { OBR, getState, change, onItemsChange } from "./engine.js";
+import { OBR, getState, change, onItemsChange, onPartyMove } from "./engine.js";
 import { advance } from "./track.js";
 
 const MIN_STEP_HOURS = 1 / 60; // move the Goers at least one game minute at a time
@@ -7,7 +7,10 @@ const MIN_STEP_HOURS = 1 / 60; // move the Goers at least one game minute at a t
 OBR.onReady(async () => {
   if ((await OBR.player.getRole()) !== "GM") return;
   const gmId = await OBR.player.getId();
-  OBR.scene.items.onChange((items) => onItemsChange(items, gmId));
+  OBR.scene.items.onChange((items) => {
+    onItemsChange(items, gmId);
+    onPartyMove(items);
+  });
   OBR.scene.local.onChange((items) => onItemsChange(items, gmId));
 
   // the labels and circles are local and vanish on reload: put them back when a scene opens
