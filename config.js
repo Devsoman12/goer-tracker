@@ -26,7 +26,7 @@ export const SETTINGS = {
   dayStartsAt: 6, // hour the sun rises
   nightStartsAt: 18, // hour the sun sets
   tokenSizePerKm: 0.01, // token width for a 1 km Goer, as a part of the map width
-  labels: true, // name labels under the tokens
+  labels: true, // name labels under the tokens at the start (switch them in the panel)
   nightOpacity: 0.45, // how dark the night overlay is
   playRates: [1, 7, 30, 365], // fast-forward choices, in days per second
 };

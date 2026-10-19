@@ -52,7 +52,10 @@
       <button id="sync" class="main">Place / update tokens</button>
       <button id="remove" title="Removes the circles, labels and night overlay; your own token images stay">Remove extension tokens</button>
     </div>
-    <div class="row"><label><input type="checkbox" id="nightOverlay"> darken the map at night</label></div>
+    <div class="row">
+      <label><input type="checkbox" id="nightOverlay"> darken the map at night</label>
+      <label><input type="checkbox" id="labels"> name labels</label>
+    </div>
     <div id="msg"></div>
     <table id="list"></table>
     <p class="muted">Your token images are found by name (see config.js); a Goer without one gets a circle. Drag a Goer off its route and it walks back to it as time passes. Goers off the map wait outside its edge, hidden.</p>

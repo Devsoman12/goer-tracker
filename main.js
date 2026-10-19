@@ -6,7 +6,7 @@ import { locate, nearestOnRoute, shiftFor, stepToward, hourOf, isNight } from ".
 const ID = "wastelands.goer-tracker";
 const STATE = `${ID}/state`;
 const TAG = `${ID}/item`;
-const DEFAULT = { hours: 8, mapId: null, reveal: {}, paused: {}, shift: {}, detached: {}, nightOverlay: true };
+const DEFAULT = { hours: 8, mapId: null, reveal: {}, paused: {}, shift: {}, detached: {}, nightOverlay: true, labels: SETTINGS.labels };
 const $ = (id) => document.getElementById(id);
 // "founder_token.png", "Founder Token" and "founder-token" all read as the same name
 const words = (s) => String(s ?? "").toLowerCase().replace(/\.(png|jpe?g|webp|gif)$/, "").split(/[^a-z0-9]+/).filter(Boolean);
@@ -138,11 +138,13 @@ async function sync(state) {
         .layer("MOUNT").visible(false).name(g.name)
         .metadata({ [TAG]: { key: g.name, goer: g.name } }).build());
     }
-    if (SETTINGS.labels && !ours(`label:${g.name}`)) {
+    if (state.labels && !ours(`label:${g.name}`)) {
       add.push(buildLabel().plainText(g.name).position(at).locked(true).disableHit(true).visible(false)
         .name(`${g.name} label`).metadata({ [TAG]: { key: `label:${g.name}`, goer: g.name } }).build());
     }
   }
+  // labels switched off are removed, so they are gone for the GM too
+  if (!state.labels) remove.push(...items.filter((i) => String(i.metadata?.[TAG]?.key).startsWith("label:")).map((i) => i.id));
   if (remove.length) await OBR.scene.items.deleteItems(remove);
   if (add.length) await OBR.scene.items.addItems(add);
   if (remove.length || add.length) items = await OBR.scene.items.getItems();
@@ -233,6 +235,7 @@ function render(state) {
   if (document.activeElement !== $("setDay")) $("setDay").value = day;
   if (document.activeElement !== $("setHour")) $("setHour").value = hour;
   $("nightOverlay").checked = !!state.nightOverlay;
+  $("labels").checked = !!state.labels;
   const list = $("list");
   list.replaceChildren();
   for (const g of GOERS) {
@@ -312,6 +315,7 @@ function wire() {
     $("play").textContent = "⏸ Stop";
   };
   $("nightOverlay").onchange = () => change(() => ({ nightOverlay: $("nightOverlay").checked }));
+  $("labels").onchange = () => change(() => ({ labels: $("labels").checked }));
   $("sync").onclick = () => change(() => ({}));
   $("remove").onclick = () => removeTokens();
   $("useMap").onclick = async () => {
