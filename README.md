@@ -16,8 +16,8 @@ Moves the Goers along their routes on the Wastelands main map, keeps the day and
 After changing `config.js`, upload it again; Owlbear picks it up on the next reload.
 
 ## Use
-1. Add the main map to the scene, select it (unlock the map layer if needed), open Goer Tracker and click **Use selected map**.
-2. Click **Place / update tokens**.
+1. Add the main map to the scene as a map.
+2. Open Goer Tracker and click **Place / update tokens**. It finds the biggest map in the scene by itself; **Find map** does it again (or uses the selected item, if you selected one).
 3. Move time with the buttons. Tick **show** next to a Goer when the players should see it.
 
 The time is saved in the scene, so it stays with the map.

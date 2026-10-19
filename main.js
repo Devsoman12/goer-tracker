@@ -27,14 +27,28 @@ async function change(fn) {
 const msg = (text) => ($("msg").textContent = text ?? "");
 
 // ---- tokens ----
-async function sync(state) {
-  if (!state.mapId) return msg("Select the map image, then click 'Use selected map'.");
-  let box;
-  try {
-    box = await OBR.scene.items.getItemBounds([state.mapId]);
-  } catch {
-    return msg("The saved map is gone. Select the map again and click 'Use selected map'.");
+// the selected item, or else the biggest image on the map layer
+async function findMap() {
+  const selection = await OBR.player.getSelection();
+  if (selection?.length) return selection[0];
+  const maps = await OBR.scene.items.getItems((item) => item.layer === "MAP" && item.type === "IMAGE");
+  let best = null;
+  let area = -1;
+  for (const map of maps) {
+    const box = await OBR.scene.items.getItemBounds([map.id]);
+    if (box.width * box.height > area) [best, area] = [map.id, box.width * box.height];
   }
+  return best;
+}
+
+async function sync(state) {
+  if (!state.mapId || !(await OBR.scene.items.getItems([state.mapId])).length) {
+    const mapId = await findMap();
+    if (!mapId) return msg("No map in this scene. Add the main map to the scene as a map first.");
+    state = { ...state, mapId };
+    await OBR.scene.setMetadata({ [STATE]: state });
+  }
+  const box = await OBR.scene.items.getItemBounds([state.mapId]);
   const toScene = ([u, v]) => ({ x: box.min.x + u * box.width, y: box.min.y + v * box.height });
   const size = SETTINGS.tokenSize * box.width;
   const mine = await OBR.scene.items.getItems((item) => item.metadata?.[TAG]);
@@ -158,12 +172,10 @@ function wire() {
   $("sync").onclick = async () => sync(await getState());
   $("remove").onclick = () => removeTokens();
   $("useMap").onclick = async () => {
-    const selection = await OBR.player.getSelection();
-    if (!selection?.length) return msg("Select the map image first (unlock the map layer if needed).");
-    const [item] = await OBR.scene.items.getItems([selection[0]]);
+    const mapId = await findMap();
+    if (!mapId) return msg("No map in this scene. Add the main map to the scene as a map first.");
     await removeTokens();
-    await change(() => ({ mapId: item.id }));
-    msg(item.layer === "MAP" ? "" : "Note: the selected item is not on the map layer.");
+    await change(() => ({ mapId }));
   };
 }
 
