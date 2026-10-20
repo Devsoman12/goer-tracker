@@ -99,7 +99,11 @@ function wire() {
   $("labels").onchange = () => change(() => ({ labels: $("labels").checked }));
   $("autoReveal").onchange = () => change(() => ({ autoReveal: $("autoReveal").checked }));
   $("sync").onclick = () => change(() => ({}));
-  $("remove").onclick = () => removeTokens();
+  // remove also forgets the map, so nothing comes back in this scene until Find map
+  $("remove").onclick = async () => {
+    await removeTokens();
+    await change(() => ({ mapId: null }));
+  };
   $("useMap").onclick = async () => {
     const mapId = await findMap();
     if (!mapId) return ($("msg").textContent = "No map in this scene. Add the main map to the scene as a map first.");

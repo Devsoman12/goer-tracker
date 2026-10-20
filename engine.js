@@ -87,12 +87,8 @@ export async function sync(state) {
     await hideAll();
     return report("The main map is not in this scene any more, so the Goers are hidden. Put it back, or select a map and click Find map.");
   }
-  if (!state.mapId) {
-    const mapId = await findMap();
-    if (!mapId) return report("No map in this scene. Add the main map to the scene as a map first.");
-    state = { ...state, mapId };
-    await saveState(state);
-  }
+  // never pick a map on its own: only Find map does that, so other scenes stay free of Goers
+  if (!state.mapId) return report("No main map in this scene, so the Goers stay off it. On the main map: select the map and click Find map.");
   const box = await OBR.scene.items.getItemBounds([state.mapId]);
   const toScene = ([u, v]) => ({ x: box.min.x + u * box.width, y: box.min.y + v * box.height });
   const perKm = SETTINGS.tokenSizePerKm * box.width;
@@ -235,7 +231,7 @@ export function onPartyMove(items) {
   if (now === partyWhere) return;
   const first = !partyWhere;
   partyWhere = now;
-  if (!first) change(() => ({}));
+  if (!first) getState().then((state) => state.mapId && change(() => ({})));
 }
 
 async function hideAll() {

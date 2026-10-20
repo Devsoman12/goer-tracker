@@ -17,7 +17,7 @@ After changing `config.js`, upload it again; Owlbear picks it up on the next rel
 
 ## Use
 1. Add the main map to the scene as a map. Add your Goer token images too (as mounts); they are found by their name (`token` in `config.js`), so keep the uploaded file names. A Goer without an image gets a coloured circle.
-2. Open Goer Tracker and click **Place / update tokens**. It finds the biggest map in the scene by itself; **Find map** does it again (or uses the selected item).
+2. Open Goer Tracker and click **Place / update tokens**. Select the main map and click **Find map** first: the tracker never picks a map by itself, so other scenes (battlemaps) stay free of Goers. **Remove extension tokens** on a scene clears it and forgets its map.
 3. Move time: type an amount, pick minutes, hours or days, press **+** or **−**. **Go to** jumps to a day and hour. **Play** runs the clock, from real time up to 365 days per second; it keeps running while the room is open in your browser, even with the panel closed.
 4. Per Goer: **⏸** pauses it, **show** reveals it to the players. Drag a Goer anywhere and it leaves its route; as time passes it walks back to the nearest point of it (**↩** puts it back at once).
 
